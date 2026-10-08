@@ -1,4 +1,4 @@
-pub(crate) mod graph;
+pub(crate) mod heuristicas;
 pub(crate) mod structs;
 
 fn main() {

@@ -7,12 +7,12 @@ Para isso, serão utilizados os dados da cidade de Ribeirão Preto extraídos do
 ## Checklist de Implementação e Avaliação
 
 ### Desafio 1: A Rota Ótima (Peso: 3.0 pts)
-- [ ] **Implementar algoritmo de busca (ex: A*):** Encontrar, obrigatoriamente, a rota com a **distância mínima** (o caminho ótimo) entre a origem e o destino.
+- [ ] **Implementar algoritmo de busca (ex: A\*):** Encontrar, obrigatoriamente, a rota com a **distância mínima** (o caminho ótimo) entre a origem e o destino.
 - [ ] **Filtro da Otimidade:** Garantir que o caminho encontrado não seja mais longo que o ótimo (sob pena de falha).
 - [ ] **Otimização de eficiência:** Minimizar a quantidade de **nós expandidos** para desempate (eficiência).
 
 ### Desafio 2: A Rota Expressa Subótima (Peso: 3.0 pts)
-- [ ] **Implementar algoritmo de busca rápida (ex: Greedy BFS ou A* com peso relaxado):** Priorizar a **velocidade extrema** para expandir o menor número de nós possível.
+- [ ] **Implementar algoritmo de busca rápida (ex: Greedy BFS ou A\* com peso relaxado):** Priorizar a **velocidade extrema** para expandir o menor número de nós possível.
 - [ ] **Filtro de Tolerância:** Garantir que a distância total da rota seja, no máximo, **15% maior** do que a distância ótima.
 - [ ] **Eficiência Extrema:** Minimizar a quantidade de nós expandidos para vencer no critério de velocidade.
 
