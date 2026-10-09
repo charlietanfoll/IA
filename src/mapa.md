@@ -1,0 +1,57 @@
+# Estrutura de Dados e Implementações (`src/`)
+
+- 📁 `src/`
+  - 📄 `structs.rs`
+    - 🏷️ `NodeId` `(type alias = u16)`
+      - ℹ️ *Índice numérico compacto (0..65535) para nós da malha viária.*
+    - 🧱 `struct Coordenada` `(#[repr(C)], Debug, Clone, Copy, PartialEq)`
+      - 🔹 **Atributos:**
+        - `x: f64` — Coordenada UTM Este em metros.
+        - `y: f64` — Coordenada UTM Norte em metros.
+      - ⚙️ **Implementações:** `impl Coordenada`
+        - `pub const fn new(x: f64, y: f64) -> Self`
+          - ↳ *Construtor inline const para instanciação em memória estática/dinâmica.*
+        - `pub fn distancia_euclidiana(&self, outro: &Coordenada) -> f64`
+          - ↳ *Cálculo euclidiano métrico direto (heurística admissível $h(n)$ do A\*).*
+    - 🧱 `struct Aresta` `(Debug, Clone, Copy, PartialEq)`
+      - 🔹 **Atributos:**
+        - `destino: NodeId` — Identificador compacto do nó de destino.
+        - `distancia: f64` — Custo ou extensão do trecho viário em metros.
+      - ⚙️ **Implementações:** `impl Aresta`
+        - `pub const fn new(destino: NodeId, distancia: f64) -> Self`
+          - ↳ *Construtor inline const para criar pares aresta-peso.*
+    - 🧱 `struct Grafo` `(Debug)`
+      - 🔹 **Atributos:**
+        - `offsets: Box<[u32]>` — Vetor contíguo de offsets CSR de tamanho $N+1$.
+        - `arestas_destino: Box<[NodeId]>` — Array contíguo de vizinhos (u16 sem padding).
+        - `arestas_distancia: Box<[f64]>` — Array contíguo de pesos/distâncias (f64 sem padding).
+        - `coordenadas: Box<[Coordenada]>` — Array plano com as posições métricas de cada nó.
+        - `id_para_osmid: Box<[u64]>` — Tabela de lookup direto de `NodeId` para `osmid` original do OSM.
+        - `osmid_para_id: HashMap<u64, NodeId>` — Dicionário hash de lookup inverso de `osmid` para `NodeId`.
+      - ⚙️ **Implementações em `structs.rs`:** `impl Grafo` *(Acesso e Consulta ao Grafo)*
+        - `pub fn osmid_para_id(&self, osmid: u64) -> Option<NodeId>`
+          - ↳ *Mapeia o identificador OSM para o ID compacto de nó.*
+        - `pub fn id_para_osmid(&self, id: NodeId) -> u64`
+          - ↳ *Recupera o OSM ID original a partir do índice interno.*
+        - `pub fn coordenada(&self, id: NodeId) -> Coordenada`
+          - ↳ *Retorna a coordenada UTM plana do nó.*
+        - `pub fn vizinhos_destinos(&self, id: NodeId) -> &[NodeId]`
+          - ↳ *Fatia contígua de IDs vizinhos com zero sobrecarga de cache.*
+        - `pub fn vizinhos_distancias(&self, id: NodeId) -> &[f64]`
+          - ↳ *Fatia contígua de distâncias das arestas adjacentes.*
+        - `pub fn vizinhos(&self, id: NodeId) -> impl Iterator<Item = Aresta> + '_`
+          - ↳ *Iterador zipado combinando destino e distância sob demanda.*
+        - `pub fn total_nos(&self) -> usize`
+          - ↳ *Quantidade total de vértices contidos na malha viária.*
+        - `pub fn total_arestas(&self) -> usize`
+          - ↳ *Quantidade total de conexões direcionadas registradas.*
+  - 📄 `graph.rs`
+    - ⚙️ **Implementações em `graph.rs`:** `impl Grafo` *(Ciclo de Vida, I/O e Serialização)*
+      - `pub fn carregar_binario<P: AsRef<Path>>(caminho: P) -> io::Result<Self>`
+        - ↳ *Desserializa o grafo em blocos contíguos a partir de `rp.graph` com validação de cabeçalho.*
+      - `pub fn salvar_binario<P: AsRef<Path>>(&self, caminho: P) -> io::Result<()>`
+        - ↳ *Persiste o grafo em binário comprimido com Magic Number `RPGR`, versão e sentinela `0xFF`.*
+      - `pub fn construir_dos_csvs<P1: AsRef<Path>, P2: AsRef<Path>>(caminho_nos: P1, caminho_arestas: P2) -> io::Result<Self>`
+        - ↳ *Processa CSVs brutos (`coordenadas_finais.csv` e `arestas.csv`) e monta o CSR bidirecional.*
+      - `pub fn carregar() -> io::Result<Self>`
+        - ↳ *Ponto de entrada: tenta carregar binário de cache ou reconstrói a partir dos CSVs caso necessário.*
