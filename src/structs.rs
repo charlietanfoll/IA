@@ -16,6 +16,7 @@ pub type NodeId = u16;
 /// Posição métrica plana projetada em metros (UTM SIRGAS 2000 / 22S).
 ///
 /// Permite o cálculo direto da distância euclidiana em metros para uso como heurística admissível no A*.
+#[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Coordenada {
     /// Coordenada UTM no eixo Este (X) em metros.
@@ -78,22 +79,25 @@ impl Aresta {
     }
 }
 
-/// Grafo Esparso Comprimido (*Compressed Sparse Row* - CSR).
+/// Grafo Esparso Comprimido (*Compressed Sparse Row* - CSR) em arquitetura SoA (*Structure of Arrays*).
 ///
-/// Todos os dados são armazenados em blocos contíguos alocados uma única vez na heap (`Box<[T]>`),
-/// garantindo ausência de fragmentação, zero alocações redundantes e acesso $O(1)$ aos vizinhos
-/// com máxima localidade de cache de CPU (L1/L2).
+/// Adota o padrão SoA, separando os atributos das arestas em dois vetores contíguos paralelos
+/// (`arestas_destino` e `arestas_distancia`), eliminando 100% de bytes de preenchimento (*padding*),
+/// maximizando a localidade espacial de cache L1/L2 e permitindo serialização/desserialização direta de blocos.
 #[derive(Debug)]
 pub struct Grafo {
-    /// Deslocamentos acumulados (*offsets*) para indexar os vizinhos de cada nó no vetor contíguo `arestas`.
+    /// Deslocamentos acumulados (*offsets*) para indexar os vizinhos de cada nó nos vetores CSR.
     ///
     /// Os vizinhos do nó `u` estão situados no intervalo de fatia:
-    /// `arestas[offsets[u] as usize .. offsets[u + 1] as usize]`.
+    /// `offsets[u] as usize .. offsets[u + 1] as usize`.
     /// O array possui tamanho fixo de $N + 1$ elementos.
     pub offsets: Box<[u32]>,
 
-    /// Vetor contíguo contendo todas as arestas agrupadas sequencialmente por nó de origem.
-    pub arestas: Box<[Aresta]>,
+    /// Vetor contíguo CSR contendo apenas os identificadores de destino dos vizinhos (u16 puro, sem padding).
+    pub arestas_destino: Box<[NodeId]>,
+
+    /// Vetor contíguo CSR contendo apenas as distâncias dos trechos viários (f64 puro, sem padding).
+    pub arestas_distancia: Box<[f64]>,
 
     /// Coordenadas métricas planas de cada nó, indexadas diretamente pelo seu [`NodeId`].
     pub coordenadas: Box<[Coordenada]>,
@@ -136,19 +140,33 @@ impl Grafo {
         self.coordenadas[id as usize]
     }
 
-    /// Retorna a fatia contígua de arestas que partem do nó fornecido.
+    /// Retorna a fatia de nós de destino vizinhos do nó fornecido.
     ///
-    /// Como as arestas estão agrupadas em um array plano CSR, a leitura de todos os vizinhos
-    /// é feita diretamente via slice em $O(1)$, com alta eficiência de cache.
-    ///
-    /// # Parâmetros
-    ///
-    /// * `id` - Identificador interno do nó de origem.
+    /// Permite percorrer conexões com máxima eficiência de cache sem carregar distâncias desnecessariamente.
     #[inline(always)]
-    pub fn vizinhos(&self, id: NodeId) -> &[Aresta] {
+    pub fn vizinhos_destinos(&self, id: NodeId) -> &[NodeId] {
         let inicio = self.offsets[id as usize] as usize;
         let fim = self.offsets[(id + 1) as usize] as usize;
-        &self.arestas[inicio..fim]
+        &self.arestas_destino[inicio..fim]
+    }
+
+    /// Retorna a fatia de distâncias das arestas que partem do nó fornecido.
+    #[inline(always)]
+    pub fn vizinhos_distancias(&self, id: NodeId) -> &[f64] {
+        let inicio = self.offsets[id as usize] as usize;
+        let fim = self.offsets[(id + 1) as usize] as usize;
+        &self.arestas_distancia[inicio..fim]
+    }
+
+    /// Retorna um iterador sobre os vizinhos do nó fornecido na forma de [`Aresta`].
+    #[inline(always)]
+    pub fn vizinhos(&self, id: NodeId) -> impl Iterator<Item = Aresta> + '_ {
+        let inicio = self.offsets[id as usize] as usize;
+        let fim = self.offsets[(id + 1) as usize] as usize;
+        self.arestas_destino[inicio..fim]
+            .iter()
+            .zip(&self.arestas_distancia[inicio..fim])
+            .map(|(&destino, &distancia)| Aresta::new(destino, distancia))
     }
 
     /// Retorna a quantidade total de nós (cruzamentos) presentes no grafo.
@@ -160,6 +178,6 @@ impl Grafo {
     /// Retorna a quantidade total de conexões direcionadas ativas no grafo.
     #[inline(always)]
     pub fn total_arestas(&self) -> usize {
-        self.arestas.len()
+        self.arestas_destino.len()
     }
 }
