@@ -1,3 +1,6 @@
+// Charlie Tanfoll Pereira Lobo - 16827968
+// Marina Cintra Queiroz - 17074404
+
 pub(crate) mod graph;
 pub(crate) mod heuristicas;
 pub(crate) mod structs;

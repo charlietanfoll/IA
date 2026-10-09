@@ -1,3 +1,6 @@
+// Charlie Tanfoll Pereira Lobo - 16827968
+// Marina Cintra Queiroz - 17074404
+
 //! # Módulo de Estruturas de Dados
 //!
 //! Este módulo define os tipos fundamentais e as estruturas de dados utilizadas para representar

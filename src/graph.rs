@@ -1,3 +1,6 @@
+// Charlie Tanfoll Pereira Lobo - 16827968
+// Marina Cintra Queiroz - 17074404
+
 //! # Módulo de Gerenciamento e Serialização do Grafo
 //!
 //! Este módulo é responsável pelo ciclo de vida do grafo:
