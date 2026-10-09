@@ -159,203 +159,137 @@ impl Grafo {
         self.arestas_destino.len()
     }
 
-    /// Carrega o grafo a partir de um arquivo binário serializado pré-compilado (`rp.graph`).
+    /// Construtor unificado da estrutura [`Grafo`].
     ///
-    /// Realiza a validação do cabeçalho de 30 bytes, obtém as quantidades exatas de nós e arestas,
-    /// aloca os blocos contíguos de memória (`Box<[T]>`) sem redundância e desserializa os dados
-    /// em tempo constante de I/O em blocos inteiros, sem loops campo a campo.
-    ///
-    /// # Estrutura do Cabeçalho Binário (30 bytes)
-    ///
-    /// | Offset | Campo | Tipo | Descrição |
-    /// |---|---|---|---|
-    /// | `0..4` | Magic Number | `[u8; 4]` | Assinatura ASCII `"RPGR"` |
-    /// | `4` | Versão | `u8` | Versão do formato (`2`) |
-    /// | `5..13` | Tamanho Metadados | `usize` (8B) | Comprimento do bloco de metadados em bytes |
-    /// | `13..21` | Quantidade de Nós | `usize` (8B) | Total de vértices na malha viária |
-    /// | `21..29` | Quantidade de Arestas | `usize` (8B) | Total de arestas direcionadas CSR |
-    /// | `29` | Sentinela | `u8` | Marcador de validação `0xFF` |
-    ///
-    /// # Parâmetros
-    ///
-    /// * `caminho` - Caminho para o arquivo binário em disco (ex: `"rp.graph"`).
+    /// Tenta carregar a malha viária a partir do arquivo binário pré-compilado de alta velocidade (`rp.graph`).
+    /// Caso o arquivo não exista ou esteja em versão incompatível/corrompido, executa automaticamente
+    /// a leitura dos arquivos tabulares originais (`data/coordenadas_finais.csv` e `data/arestas.csv`),
+    /// constrói a representação compacta CSR (*Compressed Sparse Row*) em memória, serializa e salva
+    /// a representação em `rp.graph` para persistência em execuções futuras, e retorna o grafo pronto.
     ///
     /// # Errors
     ///
-    /// Retorna [`std::io::Error`] se:
-    /// * O arquivo não puder ser aberto ou lido ([`io::ErrorKind::NotFound`], [`io::ErrorKind::PermissionDenied`]).
-    /// * A assinatura do arquivo (*Magic Number*) for diferente de `"RPGR"` ([`io::ErrorKind::InvalidData`]).
-    /// * A versão do arquivo for diferente de [`FORMAT_VERSION`] ([`io::ErrorKind::InvalidData`]).
-    /// * O tamanho informado dos metadados for incompatível ([`io::ErrorKind::InvalidData`]).
-    /// * O byte sentinela final do cabeçalho não for `0xFF` ([`io::ErrorKind::InvalidData`]).
-    /// * Ocorrer corrupção de dados ou fim inesperado do arquivo durante a leitura ([`io::ErrorKind::UnexpectedEof`]).
-    pub fn carregar_binario<P: AsRef<Path>>(caminho: P) -> io::Result<Self> {
-        let file = File::open(caminho)?;
-        let mut reader = BufReader::new(file);
+    /// Retorna [`std::io::Error`] se ocorrer erro na leitura dos arquivos CSV ou falha de escrita no arquivo binário.
+    pub fn new() -> io::Result<Self> {
+        let bin_path = "rp.graph";
+        let csv_nos_path = "data/coordenadas_finais.csv";
+        let csv_arestas_path = "data/arestas.csv";
 
-        // 1. Validar Magic Number
-        let mut magic = [0u8; 4];
-        reader.read_exact(&mut magic)?;
-        if &magic != MAGIC_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Assinatura do arquivo inválida: esperado {:?}, obtido {:?}",
-                    MAGIC_BYTES, magic
-                ),
-            ));
+        // 1. Tentar carregar a partir do binário pré-compilado
+        if Path::new(bin_path).exists() {
+            let carregar_binario = || -> io::Result<Self> {
+                let file = File::open(bin_path)?;
+                let mut reader = BufReader::new(file);
+
+                // Validar Magic Number
+                let mut magic = [0u8; 4];
+                reader.read_exact(&mut magic)?;
+                if &magic != MAGIC_BYTES {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Assinatura do arquivo inválida: esperado {:?}, obtido {:?}",
+                            MAGIC_BYTES, magic
+                        ),
+                    ));
+                }
+
+                // Validar Versão
+                let mut version = [0u8; 1];
+                reader.read_exact(&mut version)?;
+                if version[0] != FORMAT_VERSION {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Versão do formato incompatível: esperado {}, obtido {}",
+                            FORMAT_VERSION, version[0]
+                        ),
+                    ));
+                }
+
+                // Ler tamanho dos metadados
+                let mut usize_buf = [0u8; std::mem::size_of::<usize>()];
+                reader.read_exact(&mut usize_buf)?;
+                let tam_metadados = usize::from_le_bytes(usize_buf);
+
+                let tam_esperado: usize = std::mem::size_of::<usize>() * 2 + 1;
+                if tam_metadados != tam_esperado {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Tamanho de metadados inválido: esperado {} bytes, obtido {} bytes",
+                            tam_esperado, tam_metadados
+                        ),
+                    ));
+                }
+
+                // Ler quantidade de nós e arestas
+                reader.read_exact(&mut usize_buf)?;
+                let num_nos = usize::from_le_bytes(usize_buf);
+
+                reader.read_exact(&mut usize_buf)?;
+                let num_arestas = usize::from_le_bytes(usize_buf);
+
+                // Validar byte sentinela
+                let mut marker = [0u8; 1];
+                reader.read_exact(&mut marker)?;
+                if marker[0] != HEADER_MARKER {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Marcador de cabeçalho inválido: esperado 0x{:02X}, obtido 0x{:02X}",
+                            HEADER_MARKER, marker[0]
+                        ),
+                    ));
+                }
+
+                // Desserializar nós em blocos contíguos de memória
+                let mut id_para_osmid = vec![0u64; num_nos];
+                read_slice(&mut reader, &mut id_para_osmid)?;
+
+                let mut coordenadas = vec![Coordenada::new(0.0, 0.0); num_nos];
+                read_slice(&mut reader, &mut coordenadas)?;
+
+                let mut osmid_para_id = HashMap::with_capacity(num_nos);
+                for (i, &osmid) in id_para_osmid.iter().enumerate() {
+                    osmid_para_id.insert(osmid, i as NodeId);
+                }
+
+                // Desserializar offsets CSR
+                let mut offsets = vec![0u32; num_nos + 1];
+                read_slice(&mut reader, &mut offsets)?;
+
+                // Desserializar arestas SoA CSR
+                let mut arestas_destino = vec![0 as NodeId; num_arestas];
+                read_slice(&mut reader, &mut arestas_destino)?;
+
+                let mut arestas_distancia = vec![0.0f64; num_arestas];
+                read_slice(&mut reader, &mut arestas_distancia)?;
+
+                Ok(Self {
+                    offsets: offsets.into_boxed_slice(),
+                    arestas_destino: arestas_destino.into_boxed_slice(),
+                    arestas_distancia: arestas_distancia.into_boxed_slice(),
+                    coordenadas: coordenadas.into_boxed_slice(),
+                    id_para_osmid: id_para_osmid.into_boxed_slice(),
+                    osmid_para_id,
+                })
+            };
+
+            match carregar_binario() {
+                Ok(grafo) => return Ok(grafo),
+                Err(e) => {
+                    eprintln!(
+                        "Aviso: arquivo {} incompatível ou desatualizado ({}). Reconstruindo a partir dos CSVs...",
+                        bin_path, e
+                    );
+                }
+            }
         }
 
-        // 2. Validar Versão
-        let mut version = [0u8; 1];
-        reader.read_exact(&mut version)?;
-        if version[0] != FORMAT_VERSION {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Versão do formato incompatível: esperado {}, obtido {}",
-                    FORMAT_VERSION, version[0]
-                ),
-            ));
-        }
-
-        // 3. Ler usize de metadados (tamanho em bytes do bloco de metadados)
-        let mut usize_buf = [0u8; std::mem::size_of::<usize>()];
-        reader.read_exact(&mut usize_buf)?;
-        let tam_metadados = usize::from_le_bytes(usize_buf);
-
-        let tam_esperado: usize = std::mem::size_of::<usize>() * 2 + 1;
-        if tam_metadados != tam_esperado {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Tamanho de metadados inválido: esperado {} bytes, obtido {} bytes",
-                    tam_esperado, tam_metadados
-                ),
-            ));
-        }
-
-        // 4. Ler tamanhos de nós e arestas
-        reader.read_exact(&mut usize_buf)?;
-        let num_nos = usize::from_le_bytes(usize_buf);
-
-        reader.read_exact(&mut usize_buf)?;
-        let num_arestas = usize::from_le_bytes(usize_buf);
-
-        // 5. Validar o byte sentinela de fim do cabeçalho
-        let mut marker = [0u8; 1];
-        reader.read_exact(&mut marker)?;
-        if marker[0] != HEADER_MARKER {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Marcador de cabeçalho inválido: esperado 0x{:02X}, obtido 0x{:02X}",
-                    HEADER_MARKER, marker[0]
-                ),
-            ));
-        }
-
-        // 6. Desserializar nós em blocos contíguos de memória
-        let mut id_para_osmid = vec![0u64; num_nos];
-        read_slice(&mut reader, &mut id_para_osmid)?;
-
-        let mut coordenadas = vec![Coordenada::new(0.0, 0.0); num_nos];
-        read_slice(&mut reader, &mut coordenadas)?;
-
-        // Reconstruir o mapa osmid -> NodeId diretamente na heap
-        let mut osmid_para_id = HashMap::with_capacity(num_nos);
-        for (i, &osmid) in id_para_osmid.iter().enumerate() {
-            osmid_para_id.insert(osmid, i as NodeId);
-        }
-
-        // 7. Desserializar offsets CSR em bloco contíguo
-        let mut offsets = vec![0u32; num_nos + 1];
-        read_slice(&mut reader, &mut offsets)?;
-
-        // 8. Desserializar arestas SoA CSR em blocos contíguos (zero padding)
-        let mut arestas_destino = vec![0 as NodeId; num_arestas];
-        read_slice(&mut reader, &mut arestas_destino)?;
-
-        let mut arestas_distancia = vec![0.0f64; num_arestas];
-        read_slice(&mut reader, &mut arestas_distancia)?;
-
-        Ok(Self {
-            offsets: offsets.into_boxed_slice(),
-            arestas_destino: arestas_destino.into_boxed_slice(),
-            arestas_distancia: arestas_distancia.into_boxed_slice(),
-            coordenadas: coordenadas.into_boxed_slice(),
-            id_para_osmid: id_para_osmid.into_boxed_slice(),
-            osmid_para_id,
-        })
-    }
-
-    /// Serializa e grava a instância atual do grafo em disco no formato binário comprimido `rp.graph`.
-    ///
-    /// # Parâmetros
-    ///
-    /// * `caminho` - Destino em disco onde o arquivo binário será gravado.
-    ///
-    /// # Errors
-    ///
-    /// Retorna [`std::io::Error`] se ocorrer falha na criação do arquivo ou na escrita dos bytes.
-    pub fn salvar_binario<P: AsRef<Path>>(&self, caminho: P) -> io::Result<()> {
-        let file = File::create(caminho)?;
-        let mut writer = BufWriter::new(file);
-
-        let num_nos = self.coordenadas.len();
-        let num_arestas = self.arestas_destino.len();
-
-        // 1. Gravar cabeçalho: Magic Number e Versão
-        writer.write_all(MAGIC_BYTES)?;
-        writer.write_all(&[FORMAT_VERSION])?;
-
-        // 2. usize de metadados: tamanho em bytes do bloco de metadados (num_nos + num_arestas + marcador)
-        let tam_metadados: usize = std::mem::size_of::<usize>() * 2 + 1;
-        writer.write_all(&tam_metadados.to_le_bytes())?;
-
-        // 3. Metadados
-        writer.write_all(&num_nos.to_le_bytes())?;
-        writer.write_all(&num_arestas.to_le_bytes())?;
-        writer.write_all(&[HEADER_MARKER])?;
-
-        // 4. Gravar nós em blocos contíguos (SoA/Flat)
-        write_slice(&mut writer, &self.id_para_osmid)?;
-        write_slice(&mut writer, &self.coordenadas)?;
-
-        // 5. Gravar offsets CSR em bloco contíguo
-        write_slice(&mut writer, &self.offsets)?;
-
-        // 6. Gravar arestas SoA CSR em blocos contíguos (destinos: u16 e distancias: f64)
-        write_slice(&mut writer, &self.arestas_destino)?;
-        write_slice(&mut writer, &self.arestas_distancia)?;
-
-        writer.flush()?;
-        Ok(())
-    }
-
-    /// Construtor alternativo: processa os arquivos CSV brutos da malha viária,
-    /// constrói a estrutura CSR em memória e aplica deduplicação bidirecional.
-    ///
-    /// Lê as coordenadas e identificadores a partir do arquivo de nós e as ligações
-    /// viárias a partir do arquivo de arestas. Como o grafo é não orientado, cada aresta
-    /// é inserida nos dois sentidos ($u \to v$ e $v \to u$), mantendo a menor distância
-    /// em caso de trechos paralelos duplicados.
-    ///
-    /// # Parâmetros
-    ///
-    /// * `caminho_nos` - Caminho para o CSV de nós contendo colunas `osmid`, `UTM_X_Este` e `UTM_Y_Norte`.
-    /// * `caminho_arestas` - Caminho para o CSV de conexões contendo `origem`, `destino` e `distancia`.
-    ///
-    /// # Errors
-    ///
-    /// Retorna [`std::io::Error`] se algum arquivo CSV não for encontrado ou se colunas obrigatórias
-    /// estiverem ausentes no cabeçalho.
-    pub fn construir_dos_csvs<P1: AsRef<Path>, P2: AsRef<Path>>(
-        caminho_nos: P1,
-        caminho_arestas: P2,
-    ) -> io::Result<Self> {
-        // --- 1. Leitura dos Nós ---
-        let file_nos = File::open(caminho_nos)?;
+        // 2. Construção a partir dos arquivos CSV brutos
+        // Leitura dos nós
+        let file_nos = File::open(csv_nos_path)?;
         let reader_nos = BufReader::new(file_nos);
 
         let mut id_para_osmid = Vec::new();
@@ -407,8 +341,8 @@ impl Grafo {
         let num_nos = id_para_osmid.len();
         let mut adj: Vec<HashMap<NodeId, f64>> = vec![HashMap::new(); num_nos];
 
-        // --- 2. Leitura das Arestas ---
-        let file_arestas = File::open(caminho_arestas)?;
+        // Leitura das arestas
+        let file_arestas = File::open(csv_arestas_path)?;
         let reader_arestas = BufReader::new(file_arestas);
         let mut lines_arestas = reader_arestas.lines();
 
@@ -463,7 +397,7 @@ impl Grafo {
             }
         }
 
-        // --- 3. Construção do CSR SoA ---
+        // Construção do CSR SoA
         let mut offsets = Vec::with_capacity(num_nos + 1);
         let total_arestas: usize = adj.iter().map(|viz| viz.len()).sum();
         let mut arestas_destino = Vec::with_capacity(total_arestas);
@@ -480,44 +414,39 @@ impl Grafo {
         }
         offsets.push(acumulado);
 
-        Ok(Self {
+        let grafo = Self {
             offsets: offsets.into_boxed_slice(),
             arestas_destino: arestas_destino.into_boxed_slice(),
             arestas_distancia: arestas_distancia.into_boxed_slice(),
             coordenadas: coordenadas.into_boxed_slice(),
             id_para_osmid: id_para_osmid.into_boxed_slice(),
             osmid_para_id,
-        })
-    }
+        };
 
-    /// Ponto de entrada recomendado para carregamento do grafo.
-    ///
-    /// Tenta carregar diretamente o binário `rp.graph`. Caso o arquivo não exista ou esteja em versão
-    /// incompatível com a versão atual, executa automaticamente a construção a partir dos CSVs da pasta `data/`,
-    /// salva o arquivo `rp.graph` para persistência e retorna o grafo pronto.
-    ///
-    /// # Errors
-    ///
-    /// Retorna [`std::io::Error`] se ocorrer falha na leitura dos dados ou na criação do binário.
-    pub fn carregar() -> io::Result<Self> {
-        let bin_path = "rp.graph";
-        if Path::new(bin_path).exists() {
-            match Self::carregar_binario(bin_path) {
-                Ok(grafo) => Ok(grafo),
-                Err(e) => {
-                    eprintln!(
-                        "Aviso: arquivo rp.graph incompatível ou desatualizado ({}). Reconstruindo a partir dos CSVs...",
-                        e
-                    );
-                    let grafo = Self::construir_dos_csvs("data/coordenadas_finais.csv", "data/arestas.csv")?;
-                    grafo.salvar_binario(bin_path)?;
-                    Ok(grafo)
-                }
-            }
-        } else {
-            let grafo = Self::construir_dos_csvs("data/coordenadas_finais.csv", "data/arestas.csv")?;
-            grafo.salvar_binario(bin_path)?;
-            Ok(grafo)
-        }
+        // 3. Salvar binário para execuções futuras
+        let file = File::create(bin_path)?;
+        let mut writer = BufWriter::new(file);
+
+        let num_nos = grafo.coordenadas.len();
+        let num_arestas = grafo.arestas_destino.len();
+
+        writer.write_all(MAGIC_BYTES)?;
+        writer.write_all(&[FORMAT_VERSION])?;
+
+        let tam_metadados: usize = std::mem::size_of::<usize>() * 2 + 1;
+        writer.write_all(&tam_metadados.to_le_bytes())?;
+        writer.write_all(&num_nos.to_le_bytes())?;
+        writer.write_all(&num_arestas.to_le_bytes())?;
+        writer.write_all(&[HEADER_MARKER])?;
+
+        write_slice(&mut writer, &grafo.id_para_osmid)?;
+        write_slice(&mut writer, &grafo.coordenadas)?;
+        write_slice(&mut writer, &grafo.offsets)?;
+        write_slice(&mut writer, &grafo.arestas_destino)?;
+        write_slice(&mut writer, &grafo.arestas_distancia)?;
+
+        writer.flush()?;
+
+        Ok(grafo)
     }
 }
