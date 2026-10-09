@@ -11,6 +11,7 @@ use graph::*;
 
 fn main() -> Result<(), Error> {
 
-    let ribeirao_graph = Grafo::carregar()?;
+    let ribeirao_graph = Grafo::new()?;
+    
     Ok(())
 }
