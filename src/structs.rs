@@ -89,5 +89,7 @@ pub struct ResultadoBusca {
     pub distancia_total: f64,
     /// Total de nós retirados da fronteira para expansão de vizinhos.
     pub nos_expandidos: usize,
+    /// Consumo máximo de memória RAM alocada pelas estruturas durante a busca (em bytes).
+    pub memoria_pico_bytes: usize,
 }
 
