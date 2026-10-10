@@ -7,8 +7,6 @@
 //! a malha viária em memória com consumo mínimo de RAM, adotando o modelo
 //! **CSR (*Compressed Sparse Row*)**.
 
-use std::collections::HashMap;
-
 /// Identificador numérico interno compacto para nós (vértices) no intervalo `0..N-1`.
 ///
 /// Como a malha viária de Ribeirão Preto contém 19.036 nós, o tipo primitivo `u16`
@@ -80,5 +78,16 @@ impl Aresta {
     pub const fn new(destino: NodeId, distancia: f64) -> Self {
         Self { destino, distancia }
     }
+}
+
+/// Estrutura para armazenar o resultado da execução de um algoritmo de busca.
+#[derive(Debug, Clone)]
+pub struct ResultadoBusca {
+    /// Sequência ordenada de identificadores OpenStreetMap (`osmid`) da rota.
+    pub caminho: Vec<u64>,
+    /// Distância total percorrida pela rota em metros.
+    pub distancia_total: f64,
+    /// Total de nós retirados da fronteira para expansão de vizinhos.
+    pub nos_expandidos: usize,
 }
 
