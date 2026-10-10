@@ -258,12 +258,32 @@ pub fn abrir_no_navegador(caminho_arquivo: &str) -> io::Result<()> {
     };
 
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    let mut comando = {
-        let mut cmd = std::process::Command::new("xdg-open");
-        cmd.arg(caminho_arquivo);
-        cmd
-    };
+    {
+        // 1. Tenta xdg-open (padrão freedesktop para Linux de desktop)
+        if std::process::Command::new("xdg-open").arg(caminho_arquivo).spawn().is_ok() {
+            return Ok(());
+        }
+        // 2. Tenta gio open (GNOME / desktops modernos)
+        if std::process::Command::new("gio").args(["open", caminho_arquivo]).spawn().is_ok() {
+            return Ok(());
+        }
+        // 3. Tenta wslview (caso esteja executando em ambiente WSL no Windows)
+        if std::process::Command::new("wslview").arg(caminho_arquivo).spawn().is_ok() {
+            return Ok(());
+        }
+        // 4. Fallback direto para navegadores conhecidos
+        for navegador in ["google-chrome", "firefox", "chromium", "brave", "opera"] {
+            if std::process::Command::new(navegador).arg(caminho_arquivo).spawn().is_ok() {
+                return Ok(());
+            }
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Não foi possível abrir o navegador padrão (nenhum comando compatível encontrado no Linux: xdg-open, gio, wslview)",
+        ));
+    }
 
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     comando.spawn().map(|_| ())
 }
 
@@ -295,6 +315,17 @@ fn variacao_percentual(valor: f64, referencia: f64) -> String {
     format!(" ({:+.2}%)", (valor - referencia) / referencia * 100.0)
 }
 
+/// Formata bytes em representação legível (B, KB ou MB).
+fn formatar_memoria(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.2} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
 /// Monta o card HTML de métricas de um algoritmo para o painel flutuante.
 ///
 /// Se `referencia` for informada (A*), exibe a variação percentual de distância e de nós expandidos.
@@ -306,12 +337,13 @@ fn card_algoritmo(
     resultado: &ResultadoBusca,
     referencia: Option<&ResultadoBusca>,
 ) -> String {
-    let (var_distancia, var_expandidos) = match referencia {
+    let (var_distancia, var_expandidos, var_memoria) = match referencia {
         Some(ref_) => (
             variacao_percentual(resultado.distancia_total, ref_.distancia_total),
             variacao_percentual(resultado.nos_expandidos as f64, ref_.nos_expandidos as f64),
+            variacao_percentual(resultado.memoria_pico_bytes as f64, ref_.memoria_pico_bytes as f64),
         ),
-        None => (String::new(), String::new()),
+        None => (String::new(), String::new(), String::new()),
     };
 
     format!(
@@ -320,10 +352,12 @@ fn card_algoritmo(
             <div class="card-linha"><b>Distância:</b> {distancia:.2} m{var_distancia}</div>
             <div class="card-linha"><b>Cruzamentos:</b> {cruzamentos}</div>
             <div class="card-linha"><b>Nós expandidos:</b> {expandidos}{var_expandidos}</div>
+            <div class="card-linha"><b>Memória RAM (Pico):</b> {memoria}{var_memoria}</div>
         </div>"#,
         distancia = resultado.distancia_total,
         cruzamentos = resultado.caminho.len(),
         expandidos = resultado.nos_expandidos,
+        memoria = formatar_memoria(resultado.memoria_pico_bytes),
     )
 }
 
