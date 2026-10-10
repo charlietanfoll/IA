@@ -121,6 +121,7 @@ impl Grafo {
     /// Retorna a fatia de nós de destino vizinhos do nó fornecido.
     ///
     /// Permite percorrer conexões com máxima eficiência de cache sem carregar distâncias desnecessariamente.
+    #[allow(dead_code)]
     #[inline(always)]
     pub fn vizinhos_destinos(&self, id: NodeId) -> &[NodeId] {
         let inicio = self.offsets[id as usize] as usize;
@@ -129,6 +130,7 @@ impl Grafo {
     }
 
     /// Retorna a fatia de distâncias das arestas que partem do nó fornecido.
+    #[allow(dead_code)]
     #[inline(always)]
     pub fn vizinhos_distancias(&self, id: NodeId) -> &[f64] {
         let inicio = self.offsets[id as usize] as usize;
@@ -154,6 +156,7 @@ impl Grafo {
     }
 
     /// Retorna a quantidade total de conexões direcionadas ativas no grafo.
+    #[allow(dead_code)]
     #[inline(always)]
     pub fn total_arestas(&self) -> usize {
         self.arestas_destino.len()
