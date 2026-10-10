@@ -47,9 +47,9 @@
 
 ## A* (A Estrela)
 
-- [ ] Implementar a busca A* com a possibilidade de definir o peso da heurística e do caminho, mas por padrão, cada um pesa 0.5.
-- [ ] Garantir critério formal de contagem de nós expandidos.
+- [x] Implementar a busca A* com a possibilidade de definir o peso da heurística e do caminho, mas por padrão, cada um pesa 0.5.
+- [x] Garantir critério formal de contagem de nós expandidos.
 
 ## GBFS (Greedy Best-First Search)
 
-- [ ] Implementar o algoritmo guloso focado no menor número de expansões para o Desafio 2.
+- [x] Implementar o algoritmo guloso focado no menor número de expansões para o Desafio 2.
