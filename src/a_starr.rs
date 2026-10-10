@@ -64,6 +64,7 @@ impl MinHeapAStar {
     }
 
     /// Cria uma nova fronteira pré-alocando capacidade inicial de nós.
+    #[allow(dead_code)]
     #[inline]
     pub fn with_capacity(capacidade: usize) -> Self {
         Self {
@@ -84,12 +85,14 @@ impl MinHeapAStar {
     }
 
     /// Retorna `true` se a fronteira não contiver nenhum nó pendente.
+    #[allow(dead_code)]
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.heap.is_empty()
     }
 
     /// Retorna a quantidade de nós atualmente armazenados na fronteira.
+    #[allow(dead_code)]
     #[inline]
     pub fn len(&self) -> usize {
         self.heap.len()
@@ -143,12 +146,14 @@ impl Grafo {
         let mut custos_g = vec![f64::INFINITY; total_nos];
         let mut veio_de: Vec<Option<NodeId>> = vec![None; total_nos];
         let mut nos_expandidos: usize = 0;
+        let mut pico_fronteira: usize = 1;
 
         // Configuração inicial do nó de origem
         custos_g[id_origem as usize] = 0.0;
         let heuristica_origem = self.coordenada(id_origem).distancia_euclidiana(&coordenada_destino);
         let prioridade_origem_f = peso_caminho * 0.0 + peso_heuristica * heuristica_origem;
         fronteira.push(id_origem, prioridade_origem_f, heuristica_origem);
+        pico_fronteira = pico_fronteira.max(fronteira.len());
 
         while let Some(no_fronteira) = fronteira.pop() {
             let id_no_atual = no_fronteira.id;
@@ -194,10 +199,17 @@ impl Grafo {
                     .map(|&id_no| self.id_para_osmid(id_no))
                     .collect();
 
+                let memoria_pico_bytes = (total_nos * std::mem::size_of::<bool>())
+                    + (total_nos * std::mem::size_of::<f64>())
+                    + (total_nos * std::mem::size_of::<Option<NodeId>>())
+                    + (pico_fronteira * std::mem::size_of::<NoAStar>())
+                    + (caminho_ids.len() * std::mem::size_of::<NodeId>());
+
                 return Some(ResultadoBusca {
                     caminho: caminho_osmid,
                     distancia_total,
                     nos_expandidos,
+                    memoria_pico_bytes,
                 });
             }
 
@@ -224,6 +236,7 @@ impl Grafo {
                     let heuristica_vizinho = self.coordenada(id_vizinho).distancia_euclidiana(&coordenada_destino);
                     let prioridade_vizinho_f = peso_caminho * novo_custo_g + peso_heuristica * heuristica_vizinho;
                     fronteira.push(id_vizinho, prioridade_vizinho_f, heuristica_vizinho);
+                    pico_fronteira = pico_fronteira.max(fronteira.len());
                 }
             }
         }
