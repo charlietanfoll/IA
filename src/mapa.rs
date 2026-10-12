@@ -4,7 +4,17 @@
 //! # Módulo de Visualização Cartográfica (Leaflet.js)
 //!
 //! Substitui o script `verRota.py` por uma implementação nativa em Rust que gera uma página
-//! HTML interativa com a biblioteca **Leaflet.js** sobre o mapa do OpenStreetMap.
+//! HTML interativa com a biblioteca **Leaflet.js**, oferecendo suporte a múltiplos provedores
+//! de mapa para contornar limitações e bloqueios de acesso (*"Access blocked"*) do OpenStreetMap público.
+//!
+//! ## Provedores disponíveis
+//! - **CartoDB Positron (Padrão)**: camada clara e veloz, ideal para destacar as rotas sem restrições.
+//! - **CartoDB Voyager**: visualização com ruas e pontos de interesse detalhados.
+//! - **CartoDB Dark Matter**: mapa em modo escuro de alto contraste.
+//! - **Esri World Street**: malha viária global profissional.
+//! - **Esri World Imagery**: ortofotos de satélite de alta resolução.
+//! - **OpenTopoMap**: relevo e curvas de nível topográficas.
+//! - **OpenStreetMap Padrão**: servidor OSM público oficial.
 //!
 //! ## Fluxo de dados (respeitando a estrutura do [`Grafo`])
 //!
@@ -24,7 +34,8 @@
 //! - **A\* (Desafio 1 - Rota Ótima)**: linha **roxa** (`#8A2BE2`), 7 px.
 //! - **GBFS (Desafio 2 - Rota Expressa)**: linha **vermelha** (`#E53935`), 4 px, desenhada por cima
 //!   do A\*; em trechos coincidentes a linha vermelha corre pelo centro da roxa e ambas ficam visíveis.
-//! - **Controle de camadas** para ligar/desligar cada rota.
+//! - **Seletor de Provedor de Mapa**: integrado ao painel flutuante e ao controle nativo do Leaflet.
+//! - **Controle de camadas** para alternar provedores e ligar/desligar cada rota.
 //! - **Painel flutuante** com distância, cruzamentos, nós expandidos e variação percentual do GBFS.
 //! - **Enquadramento automático** (`fitBounds`) e **abertura opcional no navegador**.
 
@@ -376,13 +387,25 @@ const TEMPLATE_HTML: &str = r#"<!DOCTYPE html>
         html, body { height: 100%; margin: 0; padding: 0;
                      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
         #map { width: 100%; height: 100%; }
-        .painel { position: absolute; bottom: 24px; left: 16px; z-index: 1000; width: 300px;
+        .painel { position: absolute; bottom: 24px; left: 16px; z-index: 1000; width: 310px;
                   max-width: calc(100vw - 64px); padding: 14px 18px; border-radius: 12px;
                   background: rgba(255, 255, 255, 0.96); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2); }
         .painel-titulo { font-size: 15px; font-weight: 800; color: #1a202c; }
         .painel-subtitulo { font-size: 11px; color: #718096; margin-bottom: 10px; }
         .extremos { font-size: 12px; background: #f7fafc; padding: 8px 10px; border-radius: 6px;
                     border: 1px solid #e2e8f0; }
+        .seletor-container { margin-top: 10px; background: #f7fafc; padding: 8px 10px; border-radius: 6px;
+                             border: 1px solid #e2e8f0; }
+        .seletor-rotulo { display: block; font-size: 11px; font-weight: 700; color: #4a5568; margin-bottom: 4px; }
+        .seletor-select { width: 100%; padding: 6px 8px; font-size: 12px; border-radius: 6px;
+                          border: 1px solid #cbd5e0; background-color: #ffffff; color: #2d3748;
+                          cursor: pointer; outline: none; font-family: inherit; }
+        .seletor-select:focus { border-color: #3182ce; box-shadow: 0 0 0 2px rgba(49, 130, 206, 0.2); }
+        .aviso-osm { display: none; margin-top: 6px; font-size: 11px; line-height: 1.35;
+                     color: #9b2c2c; background: #fff5f5; padding: 6px 8px; border-radius: 4px;
+                     border-left: 3px solid #e53e3e; }
+        .leaflet-control-layers { border-radius: 8px !important; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
+                                  font-family: inherit; font-size: 12px; }
         .card { margin-top: 10px; padding: 10px; border-radius: 6px;
                 background: var(--fundo); border-left: 4px solid var(--cor); }
         .card-titulo { display: flex; justify-content: space-between; align-items: center;
@@ -401,6 +424,21 @@ const TEMPLATE_HTML: &str = r#"<!DOCTYPE html>
             <div>🟢 <b>Origem:</b> __ORIGEM__</div>
             <div>🏁 <b>Destino:</b> __DESTINO__</div>
         </div>
+        <div class="seletor-container">
+            <label for="seletor-mapa" class="seletor-rotulo">🗺️ Provedor do Mapa:</label>
+            <select id="seletor-mapa" class="seletor-select">
+                <option value="carto-light" selected>CartoDB Positron (Padrão / Claro)</option>
+                <option value="carto-voyager">CartoDB Voyager (Ruas Detalhadas)</option>
+                <option value="carto-dark">CartoDB Dark Matter (Modo Escuro)</option>
+                <option value="esri-streets">Esri World Street (Ruas Esri)</option>
+                <option value="esri-satellite">Esri World Imagery (Satélite Real)</option>
+                <option value="opentopomap">OpenTopoMap (Topográfico)</option>
+                <option value="osm-standard">OpenStreetMap Padrão (Pode bloquear)</option>
+            </select>
+            <div id="aviso-osm" class="aviso-osm">
+                ⚠️ O OpenStreetMap frequentemente bloqueia requisições locais com <i>"Access blocked"</i>. Se ocorrer, selecione o <b>CartoDB Positron</b> ou <b>Esri</b> acima.
+            </div>
+        </div>
         __CARD_A_STAR__
         __CARD_GBFS__
     </div>
@@ -408,10 +446,100 @@ const TEMPLATE_HTML: &str = r#"<!DOCTYPE html>
     <script>
         var map = L.map('map').setView(__PONTO_ORIGEM__, 13);
 
-        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(map);
+        // Provedores de mapas alternativos para contornar o bloqueio de requisições do OpenStreetMap
+        var provedores = {
+            'carto-light': L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                maxZoom: 20,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            }),
+            'carto-voyager': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                maxZoom: 20,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            }),
+            'carto-dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                maxZoom: 20,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+            }),
+            'esri-streets': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri'
+            }),
+            'esri-satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+            }),
+            'opentopomap': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                subdomains: 'abc',
+                maxZoom: 17,
+                attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM | Map style &copy; <a href="https://opentopomap.org">OpenTopoMap</a>'
+            }),
+            'osm-standard': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            })
+        };
+
+        // CartoDB Positron como camada base padrão (alta disponibilidade, sem erro de Access blocked)
+        var camadaBaseAtual = provedores['carto-light'];
+        camadaBaseAtual.addTo(map);
+
+        // Mapeamento para o controle nativo de camadas do Leaflet
+        var mapasBase = {
+            '🗺️ CartoDB Positron (Padrão)': provedores['carto-light'],
+            '🏙️ CartoDB Voyager (Ruas)': provedores['carto-voyager'],
+            '🌙 CartoDB Dark (Escuro)': provedores['carto-dark'],
+            '🚗 Esri World Street (Ruas)': provedores['esri-streets'],
+            '🛰️ Esri Satélite (Imagem)': provedores['esri-satellite'],
+            '⛰️ OpenTopoMap (Relevo)': provedores['opentopomap'],
+            '⚠️ OpenStreetMap (Padrão OSM)': provedores['osm-standard']
+        };
+
+        // Sincronização entre o seletor do painel e o mapa
+        var seletorMapa = document.getElementById('seletor-mapa');
+        var avisoOsm = document.getElementById('aviso-osm');
+
+        function alternarProvedor(chave) {
+            var novaCamada = provedores[chave];
+            if (novaCamada && novaCamada !== camadaBaseAtual) {
+                map.removeLayer(camadaBaseAtual);
+                camadaBaseAtual = novaCamada;
+                camadaBaseAtual.addTo(map);
+            }
+            if (seletorMapa && seletorMapa.value !== chave) {
+                seletorMapa.value = chave;
+            }
+            if (avisoOsm) {
+                avisoOsm.style.display = (chave === 'osm-standard') ? 'block' : 'none';
+            }
+        }
+
+        if (seletorMapa) {
+            seletorMapa.addEventListener('change', function(e) {
+                alternarProvedor(e.target.value);
+            });
+        }
+
+        map.on('baselayerchange', function(e) {
+            for (var chave in provedores) {
+                if (provedores[chave] === e.layer) {
+                    camadaBaseAtual = e.layer;
+                    if (seletorMapa) seletorMapa.value = chave;
+                    if (avisoOsm) avisoOsm.style.display = (chave === 'osm-standard') ? 'block' : 'none';
+                    break;
+                }
+            }
+        });
+
+        // Detecção de erro nos tiles do OSM com aviso contextual
+        provedores['osm-standard'].on('tileerror', function() {
+            if (avisoOsm) {
+                avisoOsm.style.display = 'block';
+                avisoOsm.innerHTML = '⚠️ <b>Bloqueio detectado no OpenStreetMap!</b> Alterne para <b>CartoDB Positron</b> ou <b>Esri</b> no seletor acima.';
+            }
+        });
 
         var rotaAStar = __ROTA_A_STAR__;
         var rotaGBFS = __ROTA_GBFS__;
@@ -447,7 +575,7 @@ const TEMPLATE_HTML: &str = r#"<!DOCTYPE html>
             .addTo(enquadramento);
 
         enquadramento.addTo(map);
-        L.control.layers(null, camadas, { collapsed: false }).addTo(map);
+        L.control.layers(mapasBase, camadas, { collapsed: false }).addTo(map);
         map.fitBounds(enquadramento.getBounds(), { padding: [60, 60] });
     </script>
 </body>

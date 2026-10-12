@@ -108,6 +108,7 @@ impl Grafo {
     /// # Retorno
     ///
     /// Retorna `Some(ResultadoBusca)` se um caminho for encontrado, ou `None` caso contrário.
+    #[allow(dead_code)]
     #[inline]
     pub fn a_star(&self, origem_osmid: u64, destino_osmid: u64) -> Option<ResultadoBusca> {
         self.a_star_ponderado(origem_osmid, destino_osmid, 0.5, 0.5)

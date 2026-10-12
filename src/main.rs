@@ -12,11 +12,16 @@ use std::time::Duration;
 
 use graph::Grafo;
 
+/// OSMID padrão de origem para rota de demonstração rápida.
+const DEMO_ORIGEM: u64 = 259576101;
+/// OSMID padrão de destino para rota de demonstração rápida.
+const DEMO_DESTINO: u64 = 259577028;
+
 fn main() -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     // 1. Carrega ou desserializa a malha viária de Ribeirão Preto
-    println!("Carregando malha viária de Ribeirão Preto...");
+    println!("Carregando Grafo de Ribeirão Preto...");
     let inicio_carga = std::time::Instant::now();
     let ribeirao_graph = Grafo::new()?;
     let tempo_carga = inicio_carga.elapsed();
@@ -27,16 +32,35 @@ fn main() -> io::Result<()> {
         ribeirao_graph.arestas_destino.len()
     );
 
-    // 2. Modo direto por linha de comando: cargo run -- <origem> <destino>
+    // 2. Modo direto por linha de comando:
+    //    cargo run -- <origem> <destino>
+    //    cargo run -- <origem> <destino> <peso_g> <peso_h>
     if args.len() == 3 {
         match (args[1].parse::<u64>(), args[2].parse::<u64>()) {
             (Ok(origem), Ok(destino)) => {
-                executar_e_exibir_buscas(&ribeirao_graph, origem, destino)?;
+                executar_e_exibir_buscas(&ribeirao_graph, origem, destino, 0.5, 0.5)?;
                 perguntar_e_abrir_mapa("mapa_rotas.html")?;
                 return Ok(());
             }
             _ => {
-                eprintln!("Uso: {} <osmid_origem> <osmid_destino>", args[0]);
+                eprintln!("Uso: {} <osmid_origem> <osmid_destino> [<peso_g> <peso_h>]", args[0]);
+                std::process::exit(1);
+            }
+        }
+    } else if args.len() == 5 {
+        match (
+            args[1].parse::<u64>(),
+            args[2].parse::<u64>(),
+            args[3].replace(',', ".").parse::<f64>(),
+            args[4].replace(',', ".").parse::<f64>(),
+        ) {
+            (Ok(origem), Ok(destino), Ok(peso_g), Ok(peso_h)) => {
+                executar_e_exibir_buscas(&ribeirao_graph, origem, destino, peso_g, peso_h)?;
+                perguntar_e_abrir_mapa("mapa_rotas.html")?;
+                return Ok(());
+            }
+            _ => {
+                eprintln!("Uso: {} <osmid_origem> <osmid_destino> <peso_g> <peso_h>", args[0]);
                 std::process::exit(1);
             }
         }
@@ -53,10 +77,10 @@ fn menu_interativo(grafo: &Grafo) -> io::Result<()> {
     loop {
         println!("==========================================");
         println!("SISTEMA DE ROTEAMENTO - RIBEIRÃO PRETO");
-        println!("IA 2026 - Prof. José Augusto Baranauskas");
+        println!("IA 2026 - Broken Ways");
         println!("==========================================");
         println!("[1] Pesquisar Rotas (informar Origem e Destino)");
-        println!("[2] Rota de Demonstração (259576101 -> 259577028)");
+        println!("[2] Rota de Demonstração ({} -> {})", DEMO_ORIGEM, DEMO_DESTINO);
         println!("[3] Abrir Último Mapa no Navegador");
         println!("[0] Sair");
         println!("==========================================");
@@ -74,7 +98,7 @@ fn menu_interativo(grafo: &Grafo) -> io::Result<()> {
             }
             "2" => {
                 println!("\nExecutando rota de demonstração padrão...");
-                executar_e_exibir_buscas(grafo, 259576101, 259577028)?;
+                executar_e_exibir_buscas(grafo, DEMO_ORIGEM, DEMO_DESTINO, 0.5, 0.5)?;
                 let abrir = perguntar_e_abrir_mapa("mapa_rotas.html")?;
                 if !abrir {
                     println!("Iniciando nova consulta...");
@@ -86,7 +110,7 @@ fn menu_interativo(grafo: &Grafo) -> io::Result<()> {
                 if std::path::Path::new(caminho_mapa).exists() {
                     println!("\nAbrindo '{}' no navegador padrão...", caminho_mapa);
                     if let Err(e) = mapa::abrir_no_navegador(caminho_mapa) {
-                        eprintln!("⚠️ Não foi possível abrir o navegador: {}", e);
+                        eprintln!("Não foi possível abrir o navegador: {}", e);
                     }
                 } else {
                     println!("\nNenhum mapa foi gerado ainda. Realize uma busca primeiro!\n");
@@ -123,8 +147,11 @@ fn loop_consultas(grafo: &Grafo) -> io::Result<()> {
             None => break,
         };
 
+        // Etapa de configuração dos pesos de balanceamento do A*
+        let (peso_g, peso_h) = ler_pesos_astar()?;
+
         println!();
-        executar_e_exibir_buscas(grafo, origem, destino)?;
+        executar_e_exibir_buscas(grafo, origem, destino, peso_g, peso_h)?;
 
         let abriu = perguntar_e_abrir_mapa("mapa_rotas.html")?;
         if !abriu {
@@ -133,6 +160,51 @@ fn loop_consultas(grafo: &Grafo) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+/// Solicita e lê os pesos de balanceamento w_g e w_h para a função de avaliação do A*:
+/// f(n) = w_g * g(n) + w_h * h(n).
+/// Permite pressionar ENTER diretamente para aceitar os valores padrão (0.5 e 0.5).
+fn ler_pesos_astar() -> io::Result<(f64, f64)> {
+    println!("\n--- Configuração de Balanceamento do A* [f(n) = w_g · g(n) + w_h · h(n)] ---");
+    println!("Pressione ENTER para aceitar o valor padrão indicado.");
+
+    let peso_g = ler_peso("Digite o peso do custo acumulado g(n) [w_g] (padrão: 0.5): ", 0.5)?;
+    let peso_h = ler_peso("Digite o peso da heurística h(n) [w_h] (padrão: 0.5): ", 0.5)?;
+
+    println!("✔ Pesos configurados para o A*: w_g = {:.2}, w_h = {:.2}", peso_g, peso_h);
+    Ok((peso_g, peso_h))
+}
+
+/// Lê e valida um peso em ponto flutuante não-negativo (f64 >= 0.0).
+/// Se o usuário teclar ENTER vazio, adota o valor default `padrao`.
+fn ler_peso(prompt: &str, padrao: f64) -> io::Result<f64> {
+    loop {
+        print!("{}", prompt);
+        io::stdout().flush()?;
+
+        let mut buffer = String::new();
+        io::stdin().read_line(&mut buffer)?;
+        let texto = buffer.trim();
+
+        if texto.is_empty() {
+            return Ok(padrao);
+        }
+
+        let texto_normalizado = texto.replace(',', ".");
+        match texto_normalizado.parse::<f64>() {
+            Ok(val) if val >= 0.0 => return Ok(val),
+            Ok(_) => {
+                println!("❌ O peso não pode ser negativo. Digite um valor >= 0.0.");
+            }
+            Err(_) => {
+                println!(
+                    "❌ Formato inválido. Digite um número decimal (ex.: 0.5 ou 1.0) ou tecle ENTER para aceitar {}.",
+                    padrao
+                );
+            }
+        }
+    }
 }
 
 /// Pergunta se o usuário deseja abrir o mapa no navegador.
@@ -148,7 +220,7 @@ fn perguntar_e_abrir_mapa(caminho_mapa: &str) -> io::Result<bool> {
     if r.is_empty() || r == "s" || r == "sim" || r == "y" || r == "yes" {
         println!("Abrindo mapa no navegador padrão...");
         if let Err(e) = mapa::abrir_no_navegador(caminho_mapa) {
-            eprintln!("⚠️ Não foi possível abrir o navegador: {}", e);
+            eprintln!("Não foi possível abrir o navegador: {}", e);
         }
         Ok(true)
     } else {
@@ -195,7 +267,13 @@ fn ler_osmid(prompt: &str, grafo: &Grafo) -> io::Result<Option<u64>> {
 }
 
 /// Executa os algoritmos A* e GBFS e exibe os resultados na formatação padrão do trabalho.
-fn executar_e_exibir_buscas(grafo: &Grafo, origem: u64, destino: u64) -> io::Result<()> {
+fn executar_e_exibir_buscas(
+    grafo: &Grafo,
+    origem: u64,
+    destino: u64,
+    peso_g: f64,
+    peso_h: f64,
+) -> io::Result<()> {
     if grafo.osmid_para_id(origem).is_none() {
         println!("❌ Erro: O cruzamento de origem {} não pertence ao grafo.", origem);
         return Ok(());
@@ -205,9 +283,9 @@ fn executar_e_exibir_buscas(grafo: &Grafo, origem: u64, destino: u64) -> io::Res
         return Ok(());
     }
 
-    // DESAFIO 1: Rota Ótima via A*
+    // DESAFIO 1: Rota Ótima via A* (com pesos configurados)
     let t_inicio_astar = std::time::Instant::now();
-    let res_a_star = grafo.a_star(origem, destino);
+    let res_a_star = grafo.a_star_ponderado(origem, destino, peso_g, peso_h);
     let tempo_a_star = t_inicio_astar.elapsed();
 
     // DESAFIO 2: Rota Expressa via GBFS
@@ -220,6 +298,7 @@ fn executar_e_exibir_buscas(grafo: &Grafo, origem: u64, destino: u64) -> io::Res
     println!("# RESULTADO DA BUSCA - DESAFIO 1 (ROTA ÓTIMA)");
     println!("------------------------------------------");
     println!("# Algoritmo utilizado: A* (A-Star)");
+    println!("# Pesos de balanceamento: w_g = {:.2}, w_h = {:.2}", peso_g, peso_h);
     println!("# Origem (osmid): {}", origem);
     println!("# Destino (osmid): {}", destino);
     println!("------------------------------------------");
