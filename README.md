@@ -1,10 +1,8 @@
 # 🗺️ Broken Ways: Além das Fronteiras
 
 Projeto prático desenvolvido para a disciplina de **Inteligência Artificial (IA)**.
-**Docente:** Prof. Dr. José Augusto Baranauskas
 **Integrantes:**
 - Charlie Tanfoll Pereira Lobo (Nº USP: 16827968)
-- Marina Cintra Queiroz (Nº USP: 17074404)
 
 ---
 
